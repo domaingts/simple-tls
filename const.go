@@ -2,9 +2,9 @@ package main
 
 const (
 	recordTypeChangeCipherSpec = 0x14
-	recordTypeAlert           = 0x15
-	recordTypeHandshake       = 0x16
-	recordTypeApplicationData = 0x17
+	recordTypeAlert            = 0x15
+	recordTypeHandshake        = 0x16
+	recordTypeApplicationData  = 0x17
 
 	hsClientHello         = 0x01
 	hsServerHello         = 0x02
