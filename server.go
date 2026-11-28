@@ -60,15 +60,15 @@ func serveTLS(raw net.Conn, certDER []byte, certPriv ed25519.PrivateKey) {
 	}
 
 	if len(clientSessionID) > 0 {
-		_ = c.writeRecord(recordTypeChangeCiperSpec, []byte{0x01})
+		_ = c.writeRecord(recordTypeChangeCipherSpec, []byte{0x01})
 	}
 
 	zeros := make([]byte, 32)
 	emptyHash := sha256.Sum256(nil)
 
-	earlySecret := hkExtract(zeros, zeros)
+	earlySecret := hkdfExtract(zeros, zeros)
 	derived1 := deriveSecret(earlySecret, "derived", emptyHash[:])
-	handshakeSecret := hkExtract(derived1, sharedSecret)
+	handshakeSecret := hkdfExtract(derived1, sharedSecret)
 
 	chToShHash := transcript.Sum(nil)
 	clientHsSecret := deriveSecret(handshakeSecret, "c hs traffic", chToShHash)
@@ -102,7 +102,7 @@ func serveTLS(raw net.Conn, certDER []byte, certPriv ed25519.PrivateKey) {
 
 	chToSfHash := transcript.Sum(nil)
 	derived2 := deriveSecret(handshakeSecret, "derived", emptyHash[:])
-	masterSecret := hkExtract(derived2, zeros)
+	masterSecret := hkdfExtract(derived2, zeros)
 	clientAppSecret := deriveSecret(masterSecret, "c ap traffic", chToSfHash)
 	serverAppSecret := deriveSecret(masterSecret, "s ap traffic", chToSfHash)
 

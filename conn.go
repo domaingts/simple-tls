@@ -44,13 +44,14 @@ func (hc *halfCipher) buildNonce() []byte {
 }
 
 type simpleTLSConn struct {
-	raw net.Conn
-	in  *halfCipher
-	out *halfCipher
+	raw     net.Conn
+	in      *halfCipher
+	out     *halfCipher
+	handBuf []byte
 }
 
 func (c *simpleTLSConn) writeRecord(contentType byte, payload []byte) error {
-	if c.out == nil {
+	if c.out == nil || contentType == recordTypeChangeCipherSpec {
 		header := []byte{contentType, 0x03, 0x03, byte(len(payload) >> 8), byte(len(payload))}
 		_, err := c.raw.Write(append(header, payload...))
 		return err
@@ -80,7 +81,7 @@ func (c *simpleTLSConn) readRecord() (byte, []byte, error) {
 			return 0, nil, err
 		}
 
-		if recType == recordTypeChangeCiperSpec {
+		if recType == recordTypeChangeCipherSpec {
 			continue
 		}
 
@@ -107,7 +108,35 @@ func (c *simpleTLSConn) readRecord() (byte, []byte, error) {
 	}
 }
 
-func hkExtract(salt, ikm []byte) []byte {
+func (c *simpleTLSConn) readHandshake() ([]byte, error) {
+	for len(c.handBuf) < 4 {
+		recType, data, err := c.readRecord()
+		if err != nil {
+			return nil, err
+		}
+		if recType != recordTypeHandshake {
+			return nil, fmt.Errorf("expect handshake(0x16), but receive 0x%x", recType)
+		}
+		c.handBuf = append(c.handBuf, data...)
+	}
+	msgLen := int(c.handBuf[1])<<16 | int(c.handBuf[2])<<8 | int(c.handBuf[3])
+	total := 4 + msgLen
+	for len(c.handBuf) < total {
+		recType, data, err := c.readRecord()
+		if err != nil {
+			return nil, err
+		}
+		if recType != recordTypeHandshake {
+			return nil, fmt.Errorf("expect handshake(0x16), but receive 0x%x", recType)
+		}
+		c.handBuf = append(c.handBuf, data...)
+	}
+	msg := append([]byte(nil), c.handBuf[:total]...)
+	c.handBuf = c.handBuf[total:]
+	return msg, nil
+}
+
+func hkdfExtract(salt, ikm []byte) []byte {
 	return computeHMAC(salt, ikm)
 }
 

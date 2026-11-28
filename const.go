@@ -1,7 +1,7 @@
 package main
 
 const (
-	recordTypeChangeCiperSpec = 0x14
+	recordTypeChangeCipherSpec = 0x14
 	recordTypeAlert           = 0x15
 	recordTypeHandshake       = 0x16
 	recordTypeApplicationData = 0x17

@@ -3,9 +3,18 @@ package main
 import (
 	"log"
 	"net"
+	"time"
 )
 
 func main() {
+	go startListen()
+	time.Sleep(5 * time.Second)
+	if err := runClient("127.0.0.1:8443", "localhost"); err != nil {
+		log.Fatalf("failed to run client: %v", err)
+	}
+}
+
+func startListen() {
 	certDER, certPriv, err := generateSelfSignedCert()
 	if err != nil {
 		log.Fatalf("failed to generate self-signed certificate: %v", err)
