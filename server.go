@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"crypto/ecdh"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash"
 	"log"
 	"math/big"
@@ -87,8 +89,58 @@ func serveTLS(raw net.Conn, certDER []byte, certPriv ed25519.PrivateKey) {
 		return
 	}
 
-	
+	cvBody := buildCertificateVerifyBody(certPriv, transcript.Sum(nil))
+	if err := sendHandshake(c, transcript, hsCertificateVerify, cvBody); err != nil {
+		return
+	}
 
+	serverFinKey := hkdfExpandLabel(serverHsSecret, "finished", nil, 32)
+	serverVerifyData := computeHMAC(serverFinKey, transcript.Sum(nil))
+	if err := sendHandshake(c, transcript, hsFinished, serverVerifyData); err != nil {
+		return
+	}
+
+	chToSfHash := transcript.Sum(nil)
+	derived2 := deriveSecret(handshakeSecret, "derived", emptyHash[:])
+	masterSecret := hkExtract(derived2, zeros)
+	clientAppSecret := deriveSecret(masterSecret, "c ap traffic", chToSfHash)
+	serverAppSecret := deriveSecret(masterSecret, "s ap traffic", chToSfHash)
+
+	recType, cfMsg, err := c.readRecord()
+	if err != nil || recType != recordTypeHandshake || len(cfMsg) != 36 || cfMsg[0] != hsFinished {
+		log.Printf("failed to read Finished: type=0x%x err=%v", recType, err)
+		return
+	}
+	clientFinKey := hkdfExpandLabel(clientHsSecret, "finished", nil, 32)
+	expectedClientVerify := computeHMAC(clientFinKey, chToSfHash)
+	if !hmac.Equal(cfMsg[4:], expectedClientVerify) {
+		log.Println("failed to verify client's Finished, stop")
+		return
+	}
+
+	if c.in, err = newHalfCipher(clientAppSecret); err != nil {
+		return
+	}
+	if c.out, err = newHalfCipher(serverAppSecret); err != nil {
+		return
+	}
+	log.Printf("TLS 1.3 handshake succeed! Peer: %s", raw.RemoteAddr())
+
+	recType, reqData, err := c.readRecord()
+	if err != nil || recType != recordTypeApplicationData {
+		log.Printf("failed to read application data: type=0x%x err=%v", recType, err)
+		return
+	}
+	fmt.Printf("\n--- receive decrypted request ---\n%s----------------------\n", string(reqData))
+
+	body := "Hello from hand-written GO TLS 1.3 Server!\n"
+	resp := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+	if err := c.writeRecord(recordTypeApplicationData, []byte(resp)); err != nil {
+		log.Printf("failed to write resp: %v", err)
+		return
+	}
+
+	_ = c.writeRecord(recordTypeAlert, []byte{0x01, 0x00})
 }
 
 func sendHandshake(c *simpleTLSConn, transcript hash.Hash, hsType byte, body []byte) error {
